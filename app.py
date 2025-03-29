@@ -13,6 +13,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from stock_analyzer import StockAnalyzer
 
+# Try to import RL components
+try:
+    import torch
+    import numpy as np
+    from torch_rl_agent import train_rl_agent, evaluate_rl_agent, DQNAgent
+    RL_AVAILABLE = True
+    print("PyTorch RL components loaded successfully!")
+except ImportError:
+    RL_AVAILABLE = False
+    print("PyTorch RL components not available. Some features will be disabled.")
+
 # Set page configuration
 st.set_page_config(
     page_title="Stock Analyzer",
@@ -165,6 +176,25 @@ with st.sidebar.expander("Advanced Options"):
         step=5,
         help="Number of days to look back for context"
     )
+    
+    # Reinforcement Learning options
+    if RL_AVAILABLE:
+        st.markdown("### Reinforcement Learning")  
+        use_rl = st.checkbox("Use Reinforcement Learning", False,
+                            help="Use a reinforcement learning agent to generate trading signals")
+        
+        rl_episodes = st.slider(
+            "Training Episodes",
+            min_value=10,
+            max_value=200,
+            value=50,
+            step=10,
+            help="Number of episodes to train the RL agent"
+        ) if use_rl else 50
+    else:
+        use_rl = False
+        rl_episodes = 50
+        st.warning("Reinforcement Learning functionality is not available. Install TensorFlow and Keras to enable it.")
 
 # Run analysis button
 run_analysis = st.sidebar.button("Run Analysis", type="primary")
@@ -179,6 +209,69 @@ def format_signal(signal):
         return f'<span class="hold-signal">{signal}</span>'
     else:
         return f'<span class="unknown-signal">{signal}</span>'
+
+# Function to perform RL analysis
+def run_rl_analysis(stock_data, market_data, episodes=10, batch_size=32):
+    """Run reinforcement learning analysis on stock data"""
+    if not RL_AVAILABLE:
+        return {
+            "signal": "HOLD",
+            "reason": "Reinforcement learning components not available"
+        }
+    
+    try:
+        # Train the RL agent
+        with st.spinner("Training RL agent..."):
+            agent, history = train_rl_agent(stock_data, market_data, episodes=episodes, batch_size=batch_size)
+        
+        # Evaluate the agent
+        with st.spinner("Evaluating RL agent..."):
+            evaluation = evaluate_rl_agent(agent, stock_data, market_data)
+        
+        # Determine signal based on agent's actions
+        actions = evaluation['actions_taken']
+        total_actions = sum(actions.values())
+        buy_ratio = actions[1] / total_actions if total_actions > 0 else 0
+        sell_ratio = actions[2] / total_actions if total_actions > 0 else 0
+        
+        # Generate signal based on agent's behavior
+        if buy_ratio > 0.6:
+            signal = "BUY"
+            reason = f"RL agent preferred buying ({buy_ratio:.1%} of actions). Final ROI: {evaluation['roi']:.2f}%"
+        elif sell_ratio > 0.6:
+            signal = "SELL"
+            reason = f"RL agent preferred selling ({sell_ratio:.1%} of actions). Final ROI: {evaluation['roi']:.2f}%"
+        else:
+            signal = "HOLD"
+            reason = f"RL agent was neutral (Buy: {buy_ratio:.1%}, Sell: {sell_ratio:.1%}). Final ROI: {evaluation['roi']:.2f}%"
+        
+        # Create visualization of training progress
+        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+        ax[0].plot(history['episode_rewards'])
+        ax[0].set_title('Episode Rewards')
+        ax[0].set_xlabel('Episode')
+        ax[0].set_ylabel('Total Reward')
+        
+        ax[1].plot(history['portfolio_values'])
+        ax[1].set_title('Portfolio Value')
+        ax[1].set_xlabel('Episode')
+        ax[1].set_ylabel('Value ($)')
+        
+        plt.tight_layout()
+        
+        return {
+            "signal": signal,
+            "reason": reason,
+            "evaluation": evaluation,
+            "history": history,
+            "visualization": fig
+        }
+    except Exception as e:
+        st.error(f"Error in RL analysis: {str(e)}")
+        return {
+            "signal": "HOLD",
+            "reason": f"Error in RL analysis: {str(e)}"
+        }
 
 # Main content
 if run_analysis:
@@ -204,12 +297,43 @@ if run_analysis:
                     lookback_period=lookback_period
                 )
                 
+                # Train RL agent if requested
+                rl_signal = None
+                rl_visualization = None
+                if use_rl and RL_AVAILABLE:
+                    with st.spinner(f"Training reinforcement learning agent for {ticker_symbol}..."):
+                        # Get stock and market data from the analyzer
+                        stock_data = analyzer.stock_data['Close']
+                        market_data = analyzer.market_data['Close']
+                        
+                        # Make sure the data series have names
+                        stock_data.name = ticker_symbol
+                        market_data.name = market_symbol
+                        
+                        # Run RL analysis
+                        rl_results = run_rl_analysis(stock_data, market_data, episodes=rl_episodes, batch_size=32)
+                        rl_signal = {
+                            "signal": rl_results["signal"],
+                            "reason": rl_results["reason"]
+                        }
+                        
+                        # Store visualization if available
+                        if "visualization" in rl_results:
+                            rl_visualization = rl_results["visualization"]
+                
                 # Get correlation signals if segment analysis is enabled
                 correlation_signals = None
+                divergence_signals = None
                 if use_segment_analysis and segment_tickers:
                     correlation_signals = analyzer.get_segment_correlation_signals(
                         lookback_period=lookback_period,
                         correlation_threshold=0.3  # Default threshold
+                    )
+                    
+                    # Also get the residual divergence analysis
+                    divergence_signals = analyzer.analyze_residual_divergence(
+                        lookback_period=lookback_period,
+                        divergence_threshold=1.5  # Default threshold
                     )
                 
                 # Display results in columns
@@ -218,29 +342,100 @@ if run_analysis:
                 with col1:
                     st.subheader("Analysis Results")
                     
-                    # Display signal
-                    st.markdown(f"### Signal: {format_signal(signal_info['signal'])}", unsafe_allow_html=True)
-                    st.markdown(f"**Reason:** {signal_info['reason']}")
+                    # Create tabs for different analysis methods
+                    if rl_signal and RL_AVAILABLE and use_rl:
+                        analysis_tabs = st.tabs(["Residual Analysis", "Reinforcement Learning"])
+                    else:
+                        analysis_tabs = st.tabs(["Residual Analysis"])
                     
-                    # Display latest data
-                    context = signal_info['context']
-                    st.markdown(f"**Latest Data (as of {context['latest_date']}):**")
+                    # Residual Analysis Tab
+                    with analysis_tabs[0]:
+                        # Display signal
+                        st.markdown(f"### Signal: {format_signal(signal_info['signal'])}", unsafe_allow_html=True)
+                        st.markdown(f"**Reason:** {signal_info['reason']}")
+                        
+                        # Display latest data
+                        context = signal_info['context']
+                        st.markdown(f"**Latest Data (as of {context['latest_date']}):**")
+                        
+                        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                        with metrics_col1:
+                            st.metric("Price", f"${context['latest_price']:.2f}")
+                        with metrics_col2:
+                            st.metric("Residual", f"{context['latest_residual']:.4f}")
+                        with metrics_col3:
+                            st.metric("Z-Score", f"{context['z_score']:.2f}")
+                        
+                        # Interpretation
+                        st.markdown("### Interpretation")
+                        st.markdown("""
+                        - **Negative residuals** suggest the stock is **undervalued** relative to the market
+                        - **Positive residuals** suggest the stock is **overvalued** relative to the market
+                        - The **strength** of the signal depends on how far the residual is from its recent average
+                        """)
                     
-                    metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-                    with metrics_col1:
-                        st.metric("Price", f"${context['latest_price']:.2f}")
-                    with metrics_col2:
-                        st.metric("Residual", f"{context['latest_residual']:.4f}")
-                    with metrics_col3:
-                        st.metric("Z-Score", f"{context['z_score']:.2f}")
-                    
-                    # Interpretation
-                    st.markdown("### Interpretation")
-                    st.markdown("""
-                    - **Negative residuals** suggest the stock is **undervalued** relative to the market
-                    - **Positive residuals** suggest the stock is **overvalued** relative to the market
-                    - The **strength** of the signal depends on how far the residual is from its recent average
-                    """)
+                    # RL Analysis Tab
+                    if rl_signal and RL_AVAILABLE and use_rl and len(analysis_tabs) > 1:
+                        with analysis_tabs[1]:
+                            # Display RL signal
+                            st.markdown(f"### RL Signal: {format_signal(rl_signal['signal'])}", unsafe_allow_html=True)
+                            st.markdown(f"**Reason:** {rl_signal['reason']}")
+                            
+                            # Display RL visualization if available
+                            if rl_visualization:
+                                st.pyplot(rl_visualization)
+                                
+                            # Add explanation of PyTorch-based RL approach
+                            st.markdown("### About the Reinforcement Learning Analysis")
+                            st.markdown("""
+                            This analysis uses a **Deep Q-Network (DQN)** implemented with PyTorch to learn optimal trading strategies:
+                            
+                            - The agent observes market conditions, stock prices, and portfolio state
+                            - It learns to take actions (buy, sell, hold) to maximize returns
+                            - Training occurs over multiple episodes to discover patterns
+                            - The final signal is based on the agent's preferred actions during evaluation
+                            
+                            *Note: RL analysis is experimental and should be used alongside traditional analysis methods.*
+                            """)
+                            st.markdown(f"**Confidence:** {rl_signal['confidence']}")
+                            
+                            # Display RL performance metrics
+                            if 'context' in rl_signal and rl_signal['context']:
+                                context = rl_signal['context']
+                                
+                                # Performance metrics
+                                st.markdown("### Performance Metrics")
+                                metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                                with metrics_col1:
+                                    st.metric("Total Return", f"{context.get('total_return', 0):.2f}%")
+                                with metrics_col2:
+                                    st.metric("Buy & Hold Return", f"{context.get('buy_hold_return', 0):.2f}%")
+                                with metrics_col3:
+                                    st.metric("Sharpe Ratio", f"{context.get('sharpe_ratio', 0):.4f}")
+                                
+                                # Latest portfolio state
+                                st.markdown(f"**Latest Portfolio State (as of {context.get('latest_date', 'N/A')}):**")
+                                metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                                with metrics_col1:
+                                    st.metric("Portfolio Value", f"${context.get('portfolio_value', 0):.2f}")
+                                with metrics_col2:
+                                    st.metric("Stock Owned", f"{context.get('stock_owned', 0):.2f} units")
+                                with metrics_col3:
+                                    st.metric("Cash Balance", f"${context.get('cash_balance', 0):.2f}")
+                                
+                                # Display RL performance chart
+                                st.markdown("### RL Agent Performance")
+                                st.image(f"plots/{ticker_symbol}_rl_performance.png", use_column_width=True)
+                                
+                            # Interpretation
+                            st.markdown("### Interpretation")
+                            st.markdown("""
+                            - The RL agent learns optimal trading strategies from historical price patterns
+                            - **BUY** signals indicate the agent expects price increases
+                            - **SELL** signals indicate the agent expects price decreases
+                            - **HOLD** signals indicate the agent expects minimal price changes
+                            - The agent's performance is compared to a simple buy & hold strategy
+                            """)
                 
                 with col2:
                     # Display regression stats
@@ -256,11 +451,11 @@ if run_analysis:
                     st.metric("Adjusted R-squared", f"{adj_r_squared:.4f}")
                     
                     # Beta (slope coefficient)
-                    beta = analyzer.model.params[1]
+                    beta = analyzer.model.params.iloc[1] if len(analyzer.model.params) > 1 else 0
                     st.metric("Beta", f"{beta:.4f}")
                     
                     # Alpha (intercept)
-                    alpha = analyzer.model.params[0]
+                    alpha = analyzer.model.params.iloc[0] if len(analyzer.model.params) > 0 else 0
                     st.metric("Alpha", f"{alpha:.4f}")
                 
                 # Create interactive plots with Plotly
@@ -268,7 +463,7 @@ if run_analysis:
                 
                 # Create tabs for different charts
                 if use_segment_analysis and segment_tickers:
-                    tab1, tab2, tab3, tab4 = st.tabs(["Price & Volume", "Residuals & Money Flow", "Regression", "Segment Analysis"])
+                    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Price & Volume", "Residuals & Money Flow", "Regression", "Correlation Analysis", "Divergence Analysis"])
                 else:
                     tab1, tab2, tab3 = st.tabs(["Price & Volume", "Residuals & Money Flow", "Regression"])
                 
@@ -314,7 +509,7 @@ if run_analysis:
                     # Residuals and money flow chart
                     fig2 = make_subplots(specs=[[{"secondary_y": True}]])
                     
-                # Add segment analysis tab if enabled
+                # Add segment correlation analysis tab if enabled
                 if use_segment_analysis and segment_tickers and 'tab4' in locals():
                     with tab4:
                         st.subheader("Market Segment Correlation Analysis")
@@ -364,6 +559,97 @@ if run_analysis:
                                 st.dataframe(signal_df.style.applymap(style_signal, subset=['Signal']))
                             else:
                                 st.info("No correlation signals generated. This could be due to insufficient data or low correlation changes.")
+                                
+                # Add segment divergence analysis tab if enabled
+                if use_segment_analysis and segment_tickers and 'tab5' in locals():
+                    with tab5:
+                        st.subheader("Residual Divergence Analysis")
+                        st.write("### What is Residual Divergence Analysis?")
+                        st.write("""
+                        This analysis detects when a stock's behavior significantly deviates from the typical pattern of its sector or segment. 
+                        Rather than using correlations, it measures how much each stock's residuals differ from the median behavior of the segment.
+                        
+                        - **High divergence + negative residual** = Potential BUY signal (stock falling unusually compared to peers)
+                        - **High divergence + positive residual** = Potential SELL signal (stock rising unusually compared to peers)
+                        """)
+                        
+                        # Display divergence signals
+                        if divergence_signals:
+                            st.write("### Divergence Signals")
+                            st.write("Signals based on how each stock's residuals diverge from the segment median:")
+                            
+                            # Create a DataFrame for better display
+                            signal_data = []
+                            for ticker, signal_info in divergence_signals.items():
+                                signal_data.append({
+                                    "Ticker": ticker,
+                                    "Signal": signal_info["signal"],
+                                    "Z-Score": f"{signal_info['latest_z_score']:.2f}",
+                                    "Residual": f"{signal_info['latest_residual']:.3f}",
+                                    "Deviation from Segment": f"{signal_info['latest_deviation']:.3f}",
+                                    "Latest Price": f"${signal_info['latest_price']:.2f}" if signal_info['latest_price'] else "N/A",
+                                    "Reason": signal_info["reason"]
+                                })
+                            
+                            if signal_data:
+                                signal_df = pd.DataFrame(signal_data)
+                                
+                                # Apply styling based on signal
+                                def style_divergence_signal(val):
+                                    if "STRONG BUY" in val:
+                                        return 'background-color: #CCFFCC; color: darkgreen; font-weight: bold'
+                                    elif "BUY" in val:
+                                        return 'background-color: #E6FFE6; color: green; font-weight: bold'
+                                    elif "STRONG SELL" in val:
+                                        return 'background-color: #FFCCCC; color: darkred; font-weight: bold'
+                                    elif "SELL" in val:
+                                        return 'background-color: #FFE6E6; color: red; font-weight: bold'
+                                    elif val == "HOLD":
+                                        return 'background-color: #FFF9CC; color: orange; font-weight: bold'
+                                    return ''
+                                
+                                # Display styled dataframe
+                                st.dataframe(signal_df.style.applymap(style_divergence_signal, subset=['Signal']))
+                                
+                                # Visualize the divergence of each stock from the segment median
+                                st.write("### Visualizing Divergence from Segment")
+                                
+                                # Plot the most recent divergence z-scores
+                                z_scores = {ticker: info['latest_z_score'] for ticker, info in divergence_signals.items()}
+                                
+                                if z_scores:
+                                    # Create bar chart of z-scores
+                                    fig_z = go.Figure()
+                                    
+                                    for ticker, z_score in z_scores.items():
+                                        color = 'green' if divergence_signals[ticker]['latest_residual'] < 0 else 'red'
+                                        fig_z.add_trace(go.Bar(
+                                            x=[ticker],
+                                            y=[z_score],
+                                            name=ticker,
+                                            marker_color=color
+                                        ))
+                                    
+                                    fig_z.update_layout(
+                                        title="Divergence Z-Scores by Ticker",
+                                        xaxis_title="Ticker",
+                                        yaxis_title="Z-Score",
+                                        showlegend=False
+                                    )
+                                    
+                                    # Add a horizontal line at the threshold
+                                    fig_z.add_shape(
+                                        type="line",
+                                        x0=-0.5,
+                                        y0=1.5,  # default threshold
+                                        x1=len(z_scores) - 0.5,
+                                        y1=1.5,
+                                        line=dict(color="orange", width=2, dash="dash"),
+                                    )
+                                    
+                                    st.plotly_chart(fig_z, use_container_width=True)
+                            else:
+                                st.info("No significant divergence signals generated.")
                             
                             # Plot historical correlations
                             if hasattr(analyzer, 'historical_correlations') and analyzer.historical_correlations:

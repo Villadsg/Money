@@ -1,0 +1,7 @@
+yfinance>=0.2.18
+pandas>=1.5.3
+numpy==1.23.5
+matplotlib>=3.7.1
+statsmodels>=0.13.5
+tensorflow==2.10.0
+protobuf==3.19.6
