@@ -1,0 +1,6 @@
+input_dim: 15
+learning_rate: 0.001
+lookback_days: 5
+tickers:
+- AVAV
+- EH

@@ -1,0 +1,46 @@
+[
+  {
+    "current_lr": 0.001,
+    "replay_buffer_size": 0,
+    "day": 0
+  },
+  {
+    "recent_loss": -0.309406447224319,
+    "loss_trend": 0,
+    "loss_std": 0,
+    "recent_reward": 0.17379076510294986,
+    "reward_trend": 0,
+    "positive_rate": 0,
+    "avg_uncertainty": 2.691646164341977,
+    "avg_grad_norm": 3.3152008300477807,
+    "current_lr": 0.001,
+    "replay_buffer_size": 44,
+    "day": 100
+  },
+  {
+    "recent_loss": -0.3233974680892731,
+    "loss_trend": 0,
+    "loss_std": 0,
+    "recent_reward": 0.17535621098020257,
+    "reward_trend": 0,
+    "positive_rate": 0,
+    "avg_uncertainty": 1.9248563134670258,
+    "avg_grad_norm": 18.316263365745545,
+    "current_lr": 0.001,
+    "replay_buffer_size": 95,
+    "day": 200
+  },
+  {
+    "recent_loss": -0.6057039538770914,
+    "loss_trend": 0,
+    "loss_std": 0.8520562741935438,
+    "recent_reward": 0.13850859114031017,
+    "reward_trend": 0,
+    "positive_rate": 0.81,
+    "avg_uncertainty": 1.5635936534404755,
+    "avg_grad_norm": 29.503645373284815,
+    "current_lr": 0.001,
+    "replay_buffer_size": 148,
+    "day": 300
+  }
+]

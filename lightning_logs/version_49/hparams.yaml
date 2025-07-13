@@ -1,0 +1,6 @@
+conservatism: 1.0
+input_dim: 15
+learning_rate: 0.001
+lookback_days: 5
+min_confidence: 0.5
+transaction_cost_pct: 0.005

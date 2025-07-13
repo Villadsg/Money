@@ -1,0 +1,5 @@
+confidence_threshold: 0.2
+input_dim: 15
+learning_rate: 0.001
+lookback_days: 5
+transaction_cost_pct: 0.005
