@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import requests
 from datetime import datetime, timedelta
+import matplotlib
+matplotlib.use('Agg')  # Use Agg backend for non-interactive plots
 import matplotlib.pyplot as plt
 from scipy import stats
 import warnings
@@ -432,9 +434,14 @@ class StockAnalyzer:
                             transform=axes[4].transAxes)
             
             plt.tight_layout()
-            plt.savefig(f'data/{ticker}_analysis.png')  # Save figure to file instead of showing
-            print(f"Analysis plot saved to data/{ticker}_analysis.png")
-            plt.close()
+            plot_filename = f'data/{ticker}_analysis.png'
+            plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+            plt.close()  # Close figure to free memory
+            print(f"Plot saved to {plot_filename}")
+            
+            # Open the saved image
+            import subprocess
+            subprocess.run(['xdg-open', plot_filename])
         except Exception as e:
             print(f"Error in plot_analysis: {str(e)}")
 

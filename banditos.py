@@ -238,19 +238,28 @@ class ContextualBandit(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=0.001)
 
 def load_data(tickers):
-    """Load and combine stock data"""
+    """Load and combine stock data from analysis files"""
     all_data = []
     
     for ticker in tickers:
-        files = glob.glob(f"data/{ticker}_features_*.parquet")
+        # Look for analysis files with date pattern
+        files = glob.glob(f"data/{ticker}_analysis_*.csv")
         if files:
             latest_file = max(files, key=os.path.getctime)
-            df = pd.read_parquet(latest_file)
+            df = pd.read_csv(latest_file)
+            
+            # The first column is the ticker, rename it
+            df.columns = ['ticker'] + df.columns[1:].tolist()
+            
+            # Add missing future_strength column (set to 0 for now)
+            if 'future_strength' not in df.columns:
+                df['future_strength'] = 0.0
+            
             all_data.append(df)
             print(f"Loaded {ticker}: {len(df)} rows")
     
     if not all_data:
-        raise ValueError("No data files found!")
+        raise ValueError("No analysis data files found!")
     
     # Combine and sort
     data = pd.concat(all_data, ignore_index=True)
